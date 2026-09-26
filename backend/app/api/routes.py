@@ -15,7 +15,7 @@ def create_museum(payload: MuseumCreate, db: Session = Depends(get_db)):
 @router.get("/museums/{museum_id}")
 def get_museum(museum_id: int, db: Session = Depends(get_db)):
     item = db.get(Museum, museum_id)
-    if not item: raise HTTPException(404, "Museum not found")
+    if not item: raise HTTPException(404, "未找到博物馆")
     return ok(MuseumOut.model_validate(item))
 @router.get("/artifacts")
 def list_artifacts(museum_id: int | None = None, search: str | None = Query(None), db: Session = Depends(get_db)):
@@ -25,27 +25,27 @@ def list_artifacts(museum_id: int | None = None, search: str | None = Query(None
     return ok([ArtifactOut.model_validate(x) for x in db.scalars(stmt).all()])
 @router.post("/artifacts", status_code=201)
 def create_artifact(payload: ArtifactCreate, db: Session = Depends(get_db)):
-    if not db.get(Museum, payload.museum_id): raise HTTPException(404, "Museum not found")
+    if not db.get(Museum, payload.museum_id): raise HTTPException(404, "未找到博物馆")
     item = Artifact(**payload.model_dump()); db.add(item); db.commit(); db.refresh(item); return ok(ArtifactOut.model_validate(item))
 @router.get("/artifacts/{artifact_id}")
 def get_artifact(artifact_id: int, db: Session = Depends(get_db)):
     item = db.get(Artifact, artifact_id)
-    if not item: raise HTTPException(404, "Artifact not found")
+    if not item: raise HTTPException(404, "未找到文物")
     return ok(ArtifactDetail.model_validate(item))
 @router.put("/artifacts/{artifact_id}")
 def update_artifact(artifact_id: int, payload: ArtifactCreate, db: Session = Depends(get_db)):
     item = db.get(Artifact, artifact_id)
-    if not item: raise HTTPException(404, "Artifact not found")
+    if not item: raise HTTPException(404, "未找到文物")
     for key, value in payload.model_dump(exclude={"museum_id"}).items(): setattr(item, key, value)
     db.commit(); db.refresh(item); return ok(ArtifactOut.model_validate(item))
 @router.delete("/artifacts/{artifact_id}")
 def delete_artifact(artifact_id: int, db: Session = Depends(get_db)):
     item = db.get(Artifact, artifact_id)
-    if not item: raise HTTPException(404, "Artifact not found")
+    if not item: raise HTTPException(404, "未找到文物")
     db.delete(item); db.commit() # TODO: delete object-storage files in a future storage service.
     return ok({"deleted": True})
 async def upload_file(artifact_id: int, file: UploadFile, db: Session, allowed: set[str], kind: str):
-    if not db.get(Artifact, artifact_id): raise HTTPException(404, "Artifact not found")
+    if not db.get(Artifact, artifact_id): raise HTTPException(404, "未找到文物")
     try: filename, path, size = await save_upload(file, artifact_id, allowed)
     except ValueError as e: raise HTTPException(400, str(e))
     common = dict(artifact_id=artifact_id, filename=filename, original_filename=file.filename or filename, file_path=path, mime_type=file.content_type or "application/octet-stream", file_size=size)
@@ -60,11 +60,10 @@ async def upload_document(artifact_id: int, file: UploadFile = File(...), db: Se
 @router.delete("/assets/{asset_id}")
 def delete_asset(asset_id: int, db: Session = Depends(get_db)):
     item = db.get(Asset, asset_id)
-    if not item: raise HTTPException(404, "Asset not found")
+    if not item: raise HTTPException(404, "未找到数字资产")
     db.delete(item); db.commit(); return ok({"deleted": True})
 @router.delete("/documents/{document_id}")
 def delete_document(document_id: int, db: Session = Depends(get_db)):
     item = db.get(Document, document_id)
-    if not item: raise HTTPException(404, "Document not found")
+    if not item: raise HTTPException(404, "未找到资料")
     db.delete(item); db.commit(); return ok({"deleted": True})
-
