@@ -1,0 +1,111 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("PRISMA_DATABASE_URL")
+}
+
+model Museum {
+  id          String        @id @default(cuid())
+  name        String
+  description String?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  assets      MuseumAsset[]
+
+  @@map("museums")
+}
+
+model MuseumAsset {
+  id                  String           @id @default(cuid())
+  museumId            String
+  name                String
+  inventoryNumber     String?          @unique
+  category            String?
+  dynasty             String?
+  material            String?
+  dimensions          String?
+  description         String?
+  imageUrl            String?
+  authorizationStatus String           @default("PENDING")
+  status              String           @default("DRAFT")
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+  museum              Museum           @relation(fields: [museumId], references: [id], onDelete: Cascade)
+  sourceDocuments     SourceDocument[]
+  metadata            AssetMetadata[]
+  narrations          Narration[]
+
+  @@index([museumId])
+  @@index([status])
+  @@map("museum_assets")
+}
+
+model SourceDocument {
+  id            String       @id @default(cuid())
+  museumAssetId String?
+  title         String
+  fileName      String?
+  fileUrl       String?
+  documentType  String?
+  source        String?
+  extractedText String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  museumAsset   MuseumAsset? @relation(fields: [museumAssetId], references: [id], onDelete: SetNull)
+
+  @@index([museumAssetId])
+  @@map("source_documents")
+}
+
+model AssetMetadata {
+  id            String      @id @default(cuid())
+  museumAssetId String
+  key           String
+  value         String
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  museumAsset   MuseumAsset @relation(fields: [museumAssetId], references: [id], onDelete: Cascade)
+
+  @@unique([museumAssetId, key])
+  @@index([museumAssetId])
+  @@map("asset_metadata")
+}
+
+model Narration {
+  id            String      @id @default(cuid())
+  museumAssetId String
+  variant       String      @default("GENERAL")
+  version       Int         @default(1)
+  title         String
+  content       String
+  language      String      @default("zh-CN")
+  status        String      @default("DRAFT")
+  sourceDocumentIds String  @default("[]")
+  sourceReference String?
+  generationSource String   @default("model")
+  isLimited     Boolean     @default(false)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  museumAsset   MuseumAsset @relation(fields: [museumAssetId], references: [id], onDelete: Cascade)
+
+  @@index([museumAssetId])
+  @@unique([museumAssetId, variant, version])
+  @@map("narrations")
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  actor      String?
+  action     String
+  entityType String
+  entityId   String
+  details    String?
+  createdAt  DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}

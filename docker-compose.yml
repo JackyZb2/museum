@@ -1,5 +1,4 @@
-cd frontend
-& "C:\Users\1\.cache\codex-runtimes\codex-primary-runtime\dependencies\bin\fallback\pnpm.cmd" devservices:
+services:
   db:
     image: postgres:16-alpine
     environment:
@@ -31,4 +30,3 @@ cd frontend
     depends_on: [backend]
 volumes:
   postgres_data:
-

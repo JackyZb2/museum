@@ -1,15 +1,11 @@
-# Backend virtual environment
+# 后端项目环境
 
-The project interpreter is `backend/.venv/Scripts/python.exe`.
+当前项目位于 `D:\Codex\projects\MuseumAI-Studio`，统一使用根目录 `.venv\Scripts\python.exe`，基于本机 Python 3.12.7。后端启动脚本也使用这个解释器；旧 `backend/.venv` 不再作为本项目默认环境。
 
-In PyCharm, choose **Settings → Project → Python Interpreter → Add Local Interpreter → Existing**, then select that file.
+在 PyCharm 中打开 `D:\Codex\projects\MuseumAI-Studio`，将项目解释器设为 `D:\Codex\projects\MuseumAI-Studio\.venv\Scripts\python.exe`。更多操作见 [`../docs/USER_GUIDE.md`](../docs/USER_GUIDE.md)。
 
-PowerShell activation:
+如果需要重新安装依赖，在项目根目录执行：
 
 ```powershell
-.\backend\.venv\Scripts\Activate.ps1
-python -m pip install -r .\backend\requirements.txt
+& .\.venv\Scripts\python.exe -m pip install -r .\backend\requirements.txt
 ```
-
-If PyPI access is blocked by the local network, run the install command again when network access is available. The virtual environment itself has already been created with Python 3.12.14.
-

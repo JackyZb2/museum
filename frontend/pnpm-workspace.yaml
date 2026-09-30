@@ -1,2 +1,9 @@
+packages:
+  - .
 allowBuilds:
-  sharp: set this to true or false
+  '@prisma/client': true
+  '@prisma/engines': true
+  prisma: true
+  esbuild: true
+  sharp: true
+unrs-resolver: true
