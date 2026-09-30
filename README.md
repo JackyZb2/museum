@@ -2,6 +2,8 @@
 
 新用户请先阅读 [当前功能与使用说明](docs/USER_GUIDE.md)，包含 D 盘项目的 PyCharm 环境设置、启动方法与 AI 知识卡操作。
 
+下载本版本完整源码：[MuseumAI-Studio-v0.2.0-source.zip](MuseumAI-Studio-v0.2.0-source.zip)。压缩包不包含本地密钥、数据库、上传文件或依赖目录。
+
 MuseumAI Studio 是面向博物馆数字资产管理与文化内容工作的开源项目。当前版本保留已有文物管理演示，并提供中文后台、Prisma/SQLite 核心数据模型，以及基于 AI Provider 的文物知识卡分析流程。
 
 ## 本地运行（无需 Docker）
