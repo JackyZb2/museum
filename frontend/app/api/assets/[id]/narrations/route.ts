@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '../../../../../lib/prisma';
 import { getAIProvider } from '../../../../../lib/ai';
+import { apiFailure, withApiErrors } from '../../../../../lib/api-errors';
 import { createLimitedNarrations } from '../../../../../lib/ai/narration-templates';
 import type {
   GenerateNarrationsInput,
@@ -28,7 +29,7 @@ function parseArray(value: string): unknown[] {
   }
 }
 
-export async function GET(_request: NextRequest, context: Context) {
+export const GET = withApiErrors(async (_request: NextRequest, context: Context) => {
   const { id } = await context.params;
   const asset = await prisma.museumAsset.findUnique({
     where: { id },
@@ -59,9 +60,9 @@ export async function GET(_request: NextRequest, context: Context) {
       sourceReference: parseArray(narration.sourceReference || '[]'),
     })),
   );
-}
+});
 
-export async function POST(request: NextRequest, context: Context) {
+export const POST = withApiErrors(async (request: NextRequest, context: Context) => {
   const { id } = await context.params;
   const body: unknown = await request.json().catch(() => null);
   if (!body || typeof body !== 'object' || Array.isArray(body))
@@ -206,10 +207,7 @@ export async function POST(request: NextRequest, context: Context) {
       limited: !hasGroundedFacts,
       source: generated.source,
     });
-  } catch {
-    return NextResponse.json(
-      { error: '讲解保存失败；本次没有写入新版本，请重试。' },
-      { status: 409 },
-    );
+  } catch (error) {
+    return apiFailure(error);
   }
-}
+});

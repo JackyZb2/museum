@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '../../../../../../lib/prisma';
+import { apiFailure, withApiErrors } from '../../../../../../lib/api-errors';
 
 export const runtime = 'nodejs';
 type Context = { params: Promise<{ id: string; narrationId: string }> };
@@ -11,7 +12,7 @@ async function input(request: NextRequest) {
     : null;
 }
 
-export async function PATCH(request: NextRequest, context: Context) {
+export const PATCH = withApiErrors(async (request: NextRequest, context: Context) => {
   const { id, narrationId } = await context.params;
   const body = await input(request);
   const content = body?.content;
@@ -66,12 +67,17 @@ export async function PATCH(request: NextRequest, context: Context) {
       });
     });
     return NextResponse.json({ success: true, status: 'EDITED' });
-  } catch {
-    return NextResponse.json({ error: '版本已发生变化，请刷新后重新编辑。' }, { status: 409 });
+  } catch (error) {
+    if (error instanceof Error && error.message === 'conflict')
+      return NextResponse.json(
+        { error: '版本已发生变化，请先复制保留当前文字，再刷新核对。' },
+        { status: 409 },
+      );
+    return apiFailure(error);
   }
-}
+});
 
-export async function POST(request: NextRequest, context: Context) {
+export const POST = withApiErrors(async (request: NextRequest, context: Context) => {
   const { id, narrationId } = await context.params;
   const body = await input(request);
   const updatedAt = body?.updatedAt;
@@ -112,7 +118,9 @@ export async function POST(request: NextRequest, context: Context) {
       });
     });
     return NextResponse.json({ success: true, status: 'APPROVED' });
-  } catch {
-    return NextResponse.json({ error: '版本已发生变化，请刷新后重新审核。' }, { status: 409 });
+  } catch (error) {
+    if (error instanceof Error && error.message === 'conflict')
+      return NextResponse.json({ error: '版本已发生变化，请刷新后重新审核。' }, { status: 409 });
+    return apiFailure(error);
   }
-}
+});

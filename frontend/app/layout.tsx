@@ -3,8 +3,8 @@ import { AppShell } from '../components/AppShell';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'MuseumAI Studio｜博物馆数字资产工作台',
-  description: '博物馆文物与数字资产管理工作台',
+  title: '文博数字资产 AI 工作台',
+  description: '让馆藏数字资产从存起来走向用起来，以资料为依据，以人工审核为关口。',
 };
 
 export default function Layout({ children }: Readonly<{ children: React.ReactNode }>) {

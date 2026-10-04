@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '../../../../../lib/prisma';
+import { apiFailure } from '../../../../../lib/api-errors';
 
 export const runtime = 'nodejs';
 type Context = { params: Promise<{ id: string }> };
@@ -34,7 +35,7 @@ export async function POST(_request: NextRequest, context: Context) {
       return { status: 200, success: true };
     });
     return NextResponse.json(result, { status: result.status });
-  } catch {
-    return NextResponse.json({ error: '发布失败，请稍后重试。' }, { status: 500 });
+  } catch (error) {
+    return apiFailure(error);
   }
 }

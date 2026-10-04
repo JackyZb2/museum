@@ -1,9 +1,13 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { PublishControl } from '../../../../components/PublishControl';
+import { userError } from '../../../../lib/client-errors';
+import { StatusBadge } from '../../../../components/ui/StatusBadge';
+import { Feedback } from '../../../../components/ui/Feedback';
+import { EmptyState } from '../../../../components/ui/PageState';
 
 type Narration = {
   id: string;
@@ -33,18 +37,15 @@ const variants = [
   ['PROFESSIONAL', '专业版'],
   ['SHORT', '30 秒短讲解'],
 ] as const;
-const statusLabels: Record<string, string> = {
-  AI_GENERATED: 'AI生成 · 待人工审核',
-  EDITED: '已人工编辑 · 待审核',
-  APPROVED: '已审核',
-};
 const eventLabels: Record<string, string> = {
+  DEMO_ASSET_UPLOADED: '载入演示文物',
   NARRATION_GENERATED: '生成四种讲解',
   NARRATION_EDITED: '人工编辑讲解',
   NARRATION_APPROVED: '人工审核通过',
   ASSET_PUBLISHED: '发布文物',
   AI_ANALYSIS_STARTED: '开始 AI 分析',
   AI_ANALYSIS_COMPLETED: '完成 AI 分析',
+  AI_ANALYSIS_FAILED: 'AI 分析失败，未覆盖已有资料',
   ASSET_UPDATED: '修改文物基本信息',
 };
 
@@ -64,6 +65,7 @@ export default function NarrationReviewPage() {
   const [draft, setDraft] = useState('');
   const [staffSourceText, setStaffSourceText] = useState('');
   const [busy, setBusy] = useState(false);
+  const locked = useRef(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
 
@@ -88,10 +90,12 @@ export default function NarrationReviewPage() {
   }, [id]);
 
   useEffect(() => {
-    void load().catch((reason) => setError(String(reason)));
+    void load().catch((reason) => setError(userError(reason, '审核资料加载失败。')));
   }, [load]);
 
   async function mutate(item: Narration, action: 'edit' | 'approve') {
+    if (locked.current) return;
+    locked.current = true;
     setError('');
     setNotice('');
     setBusy(true);
@@ -106,19 +110,22 @@ export default function NarrationReviewPage() {
         ),
       });
       if (!response.ok) throw new Error(await readError(response));
-      setEditId(null);
       await load();
+      setEditId(null);
       setNotice(
         action === 'edit' ? '人工修改已保存，仍需审核通过。' : '此版本已审核通过，内容已锁定。',
       );
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '操作失败。');
+      setError(userError(reason));
     } finally {
+      locked.current = false;
       setBusy(false);
     }
   }
 
   async function regenerate(variant?: string) {
+    if (locked.current) return;
+    locked.current = true;
     setError('');
     setNotice('');
     setBusy(true);
@@ -129,8 +136,6 @@ export default function NarrationReviewPage() {
         body: JSON.stringify({ staffSourceText, variant }),
       });
       if (!response.ok) throw new Error(await readError(response));
-      setEditId(null);
-      setStaffSourceText('');
       await load();
       setNotice(
         variant
@@ -138,8 +143,9 @@ export default function NarrationReviewPage() {
           : '已生成四个新版本；原有已审核版本仍保留，新版本需要重新人工审核。',
       );
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '重新生成失败。');
+      setError(userError(reason, '重新生成失败，补充资料和编辑文字已保留。'));
     } finally {
+      locked.current = false;
       setBusy(false);
     }
   }
@@ -150,16 +156,32 @@ export default function NarrationReviewPage() {
         ← 返回文物知识卡
       </Link>
       <header>
-        <h1 className="mt-3 text-3xl font-bold">AI 讲解人工审核</h1>
-        <p className="muted mt-2">
+        <p className="eyebrow mt-4">内容核对 / 人工确认</p>
+        <h1 className="museum-title mt-2 text-3xl font-semibold">AI 讲解人工审核</h1>
+        <p className="muted mt-3 text-sm">
           {assetName || '正在加载文物……'} · AI 生成内容不会自动审核或发布。
         </p>
       </header>
+      <Feedback tone="info" title="审核前，请先核对内容依据">
+        逐条确认讲解中的事实是否有资料支持。AI
+        草稿不等于馆方确认，已审核版本将锁定；重新生成会保留旧版本。
+      </Feedback>
+      <nav aria-label="讲解版本定位" className="flex flex-wrap gap-2">
+        {variants.map(([variant, title]) => (
+          <a key={variant} href={`#review-${variant}`} className="button secondary">
+            {title}
+          </a>
+        ))}
+        <a href="#review-history" className="button secondary">
+          处理记录
+        </a>
+      </nav>
       <section className="card flex flex-wrap items-center justify-between gap-4 p-5">
         <div>
-          <h2 className="font-bold">
-            发布状态：{assetStatus === 'PUBLISHED' ? '已发布' : '未发布'}
-          </h2>
+          <div className="flex items-center gap-3">
+            <h2 className="font-semibold">公开展示</h2>
+            <StatusBadge status={assetStatus || 'DRAFT'} />
+          </div>
           <p className="muted mt-1 text-sm">
             已审核讲解版本：{approvedCount}。发布后游客只会看到已审核内容。
           </p>
@@ -197,42 +219,35 @@ export default function NarrationReviewPage() {
         </button>
       </section>
       {error && (
-        <p role="alert" className="rounded-lg bg-red-50 p-4 text-red-700">
+        <Feedback tone="error" title="审核操作未完成">
           {error}
-        </p>
+        </Feedback>
       )}
-      {notice && (
-        <p role="status" className="rounded-lg bg-cyan-50 p-4 text-cyan-800">
-          {notice}
-        </p>
-      )}
+      {notice && <Feedback tone="success">{notice}</Feedback>}
       {variants.map(([variant, title]) => {
         const versions = items
           .filter((item) => item.variant === variant)
           .sort((a, b) => b.version - a.version);
         return (
-          <section key={variant} className="card p-6">
+          <section key={variant} id={`review-${variant}`} className="card scroll-mt-6 p-5 sm:p-6">
             <h2 className="text-xl font-bold">{title}</h2>
-            {versions.length === 0 && <p className="muted mt-4">尚无讲解版本，请先生成。</p>}
+            {versions.length === 0 && (
+              <div className="mt-4">
+                <EmptyState
+                  title="尚无此类讲解"
+                  description="提供可核实资料后生成讲解，再进行编辑和人工审核。"
+                />
+              </div>
+            )}
             <div className="mt-4 space-y-5">
               {versions.map((item) => (
                 <article
                   key={item.id}
-                  className={`rounded-lg border p-5 ${item.status === 'APPROVED' ? 'border-emerald-300 bg-emerald-50/40' : 'border-amber-200 bg-amber-50/30'}`}
+                  className={`rounded-lg border p-4 sm:p-5 ${item.status === 'APPROVED' ? 'border-emerald-200 bg-emerald-50/20' : 'border-amber-200 bg-[#fdfcf8]'}`}
                 >
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <h3 className="font-bold">第 {item.version} 版</h3>
-                    <span
-                      className={`rounded-full px-3 py-1 text-sm font-bold ${
-                        item.status === 'APPROVED'
-                          ? 'bg-emerald-100 text-emerald-800'
-                          : item.status === 'EDITED'
-                            ? 'bg-blue-100 text-blue-800'
-                            : 'bg-amber-100 text-amber-800'
-                      }`}
-                    >
-                      {statusLabels[item.status] || '状态待确认'}
-                    </span>
+                    <StatusBadge status={item.status} />
                   </div>
                   <p className="muted mt-2 text-sm">
                     {item.status === 'APPROVED'
@@ -256,10 +271,13 @@ export default function NarrationReviewPage() {
                       rows={12}
                       maxLength={10000}
                       value={draft}
+                      disabled={busy}
                       onChange={(event) => setDraft(event.target.value)}
                     />
                   ) : (
-                    <p className="mt-4 whitespace-pre-wrap leading-8">{item.content}</p>
+                    <p className="reading-copy mt-4 whitespace-pre-wrap text-stone-700">
+                      {item.content}
+                    </p>
                   )}
                   <div className="mt-4 flex flex-wrap gap-3">
                     {item.version === versions[0].version && (
@@ -316,7 +334,7 @@ export default function NarrationReviewPage() {
                         </>
                       ))}
                   </div>
-                  <div className="mt-5 border-t pt-4 text-sm">
+                  <div className="mt-5 rounded-lg border border-stone-200 bg-white p-4 text-sm">
                     <h4 className="font-bold">内容依据</h4>
                     {item.sourceDocuments.length ? (
                       <ul className="mt-2 list-disc pl-5">
@@ -340,10 +358,15 @@ export default function NarrationReviewPage() {
           </section>
         );
       })}
-      <section className="card p-6">
+      <section id="review-history" className="card scroll-mt-6 p-6">
         <h2 className="text-xl font-bold">处理记录</h2>
         {events.length === 0 ? (
-          <p className="muted mt-3">暂无记录。</p>
+          <div className="mt-4">
+            <EmptyState
+              title="尚无处理记录"
+              description="分析、生成、编辑、审核和发布操作会记录在这里，便于追溯。"
+            />
+          </div>
         ) : (
           <ol className="mt-4 space-y-3 border-l-2 border-slate-200 pl-5">
             {events.map((event) => (
@@ -369,7 +392,16 @@ export default function NarrationReviewPage() {
                   </p>
                 )}
                 <p className="muted text-sm">
-                  {new Date(event.createdAt).toLocaleString('zh-CN')} · {event.actor || '系统'}
+                  {new Date(event.createdAt).toLocaleString('zh-CN')} ·{' '}
+                  {(
+                    {
+                      mock: '模拟模型',
+                      'openai-compatible': '兼容模型服务',
+                      'AI Provider': 'AI 服务',
+                    } as Record<string, string>
+                  )[event.actor || ''] ||
+                    event.actor ||
+                    '系统'}
                 </p>
               </li>
             ))}

@@ -3,9 +3,17 @@ import 'server-only';
 import path from 'node:path';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
+import sharp from 'sharp';
 
 export const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
-export const UPLOAD_DIRECTORY = path.join(process.cwd(), '.local-uploads');
+export class ImageStorageError extends Error {
+  constructor() {
+    super('图片保存失败，文件存储暂不可用。请保留所选图片，检查磁盘空间和目录权限后重试。');
+  }
+}
+export const UPLOAD_DIRECTORY = process.env.MUSEUMAI_UPLOAD_DIRECTORY?.trim()
+  ? path.resolve(process.env.MUSEUMAI_UPLOAD_DIRECTORY)
+  : path.join(process.cwd(), '.local-uploads');
 
 export function imageMime(bytes: Buffer): 'image/jpeg' | 'image/png' | 'image/webp' | null {
   if (bytes.subarray(0, 3).equals(Buffer.from([0xff, 0xd8, 0xff]))) return 'image/jpeg';
@@ -22,10 +30,22 @@ export async function saveImage(file: File): Promise<{ fileName: string; mime: s
   const bytes = Buffer.from(await file.arrayBuffer());
   const mime = imageMime(bytes);
   if (!mime) throw new Error('仅支持 JPEG、PNG 或 WebP 图片。');
+  try {
+    await sharp(bytes, { limitInputPixels: 40_000_000, failOn: 'warning' })
+      .resize(1, 1)
+      .raw()
+      .toBuffer();
+  } catch {
+    throw new Error('图片已损坏或像素尺寸过大，请重新选择有效图片（最多 4000 万像素）。');
+  }
   const extension = mime === 'image/jpeg' ? 'jpg' : mime === 'image/png' ? 'png' : 'webp';
   const fileName = `${randomUUID()}.${extension}`;
-  await mkdir(UPLOAD_DIRECTORY, { recursive: true });
-  await writeFile(path.join(UPLOAD_DIRECTORY, fileName), bytes, { flag: 'wx' });
+  try {
+    await mkdir(UPLOAD_DIRECTORY, { recursive: true });
+    await writeFile(path.join(UPLOAD_DIRECTORY, fileName), bytes, { flag: 'wx' });
+  } catch {
+    throw new ImageStorageError();
+  }
   return { fileName, mime };
 }
 

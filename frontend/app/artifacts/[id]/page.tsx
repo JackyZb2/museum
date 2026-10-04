@@ -1,7 +1,7 @@
 'use client';
 import Link from 'next/link';
 import Image from 'next/image';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { assetUrl, getArtifact, removeAsset, removeDocument, upload } from '../../../lib/api';
 import { Artifact } from '../../../types';
@@ -10,6 +10,20 @@ export default function Detail() {
   const p = useParams<{ id: string }>();
   const [a, setA] = useState<Artifact | null>(null),
     [error, setError] = useState('');
+  const locked = useRef(false);
+  async function remove(id: number, kind: 'asset' | 'document') {
+    if (locked.current || !confirm('确定删除此文件记录吗？正在引用的资料不应删除。')) return;
+    locked.current = true;
+    try {
+      await (kind === 'asset' ? removeAsset(id) : removeDocument(id));
+      await load();
+      setError('');
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : '删除失败，原数据保留。');
+    } finally {
+      locked.current = false;
+    }
+  }
   const load = useCallback(
     () =>
       getArtifact(p.id)
@@ -20,10 +34,20 @@ export default function Detail() {
   useEffect(() => {
     void load();
   }, [load]);
-  if (error) return <div className="text-red-600">{error}</div>;
+  if (error && !a)
+    return (
+      <div role="alert" className="text-red-600">
+        {error}
+      </div>
+    );
   if (!a) return <div className="muted">正在加载……</div>;
   return (
     <>
+      {error && (
+        <p role="alert" className="mb-4 text-red-700">
+          {error}
+        </p>
+      )}
       <header className="flex justify-between mb-8">
         <div>
           <Link href="/artifacts" className="text-cyan-700 text-sm">
@@ -79,13 +103,7 @@ export default function Detail() {
               <div className="p-3 text-sm">
                 <div className="truncate font-semibold">{x.original_filename}</div>
                 <div className="muted">{size(x.file_size)}</div>
-                <button
-                  className="text-red-600 mt-2"
-                  onClick={async () => {
-                    await removeAsset(x.id);
-                    load();
-                  }}
-                >
+                <button className="text-red-600 mt-2" onClick={() => void remove(x.id, 'asset')}>
                   删除
                 </button>
               </div>
@@ -110,13 +128,7 @@ export default function Detail() {
                   {x.mime_type} · {size(x.file_size)}
                 </div>
               </div>
-              <button
-                className="text-red-600"
-                onClick={async () => {
-                  await removeDocument(x.id);
-                  load();
-                }}
-              >
+              <button className="text-red-600" onClick={() => void remove(x.id, 'document')}>
                 删除
               </button>
             </div>
@@ -137,6 +149,9 @@ function Section({
   onUpload: (f: File) => Promise<void>;
   children: React.ReactNode;
 }) {
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const locked = useRef(false);
   return (
     <section className="card p-6 mb-6">
       <div className="flex justify-between items-center mb-5">
@@ -149,11 +164,34 @@ function Section({
             accept={accept}
             onChange={async (e) => {
               const f = e.target.files?.[0];
-              if (f) await onUpload(f);
+              if (!f || locked.current) return;
+              locked.current = true;
+              setBusy(true);
+              setError('');
+              try {
+                await onUpload(f);
+              } catch (reason) {
+                setError(reason instanceof Error ? reason.message : '上传失败，所选文件保留。');
+              } finally {
+                locked.current = false;
+                setBusy(false);
+              }
             }}
           />
         </label>
       </div>
+      {busy && <p role="status">正在上传…</p>}
+      {error && (
+        <p role="alert" className="mb-4 text-red-700">
+          {error}
+        </p>
+      )}
+      {title === '资料文档' && (
+        <p className="muted mb-4 text-sm">
+          此处仅保存文件，不解析 PDF（含扫描件）或 Word 文字。请在 AI
+          知识卡中粘贴可核实文本；已上传文件不会自动成为 AI 内容依据。
+        </p>
+      )}
       {children}
     </section>
   );

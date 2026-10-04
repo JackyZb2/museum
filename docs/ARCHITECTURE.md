@@ -1,5 +1,15 @@
 # MuseumAI Studio 架构说明
 
+## 最终 MVP 架构快照（2026-10-04）
+
+新核心路径：中文浏览器界面 → Next.js Route Handler → Prisma/SQLite 或统一 AI Provider → 本地图片存储。`/` 是简洁项目首页，`/dashboard` 是真实数据库统计；后台主导航为工作台概览、文物资产、新增文物、离线演示。旧 `/artifacts` 单独连接 FastAPI/SQLAlchemy，新流程不依赖 Python 服务。下文早期阶段的导航描述仅是历史记录。
+
+已提交两条 Prisma 迁移：`20260930010000_init_core`、`20260930130330_narration_provenance`，本次在临时 SQLite 中验证了空库升级。数据表包括 Museum、MuseumAsset、SourceDocument、AssetMetadata、Narration、AuditLog；本阶段不新增 schema。
+
+来源资料在新流程中是粘贴文字，尚无资料文件上传和 PDF/Word 正文解析。MuseumAsset.authorizationStatus 默认 PENDING，虽然模型预留授权字段，但缺少用户确认控件及发布授权校验。当前发布门槛只包含已审核讲解和处理状态，不应宣传为版权授权验证。
+
+测试脚本 `frontend/scripts/test-mvp-final.ts` 将 Prisma URL、上传路径和模型地址指向隔离环境，运行三种配置验证既有能力。浏览器验收也使用该隔离环境。全局不设置 loading.tsx，以保持未发布游客路由的真实 HTTP 404。公开页查询已发布文物，讲解只取已审核版本；后台没有登录和权限，因此不能部署公网。
+
 ## 当前结构
 
 - `frontend/`：Next.js App Router、React、TypeScript strict mode 和 Tailwind CSS，负责中文管理界面。
@@ -50,3 +60,10 @@ FastAPI 现有表继续由 Alembic 管理。本阶段 Prisma 迁移只管理 Pri
 - ESLint 负责静态检查，Prettier 负责格式化。
 - 运行 `pnpm lint`、`pnpm typecheck`、`pnpm build` 作为前端基础质量检查。
 - 用户可见界面和提示均使用中文；代码标识、数据库字段和 API 路径使用英文。
+## 离线答辩演示扩展
+
+`/demo` 使用 `lib/demo/catalog.ts` 的三个本地样本和 `public/demo-images/` 的示意图。`/api/demo` 负责幂等初始化、顺序执行与重置，`lib/demo/service.ts` 固定使用 MockAIProvider，不走外部 AI 或 PDF 服务。正常业务仍使用统一 Provider 工厂。
+
+演示样本属于独立演示馆，固定编号、授权状态为 `DEMO_ONLY`，说明中明确标记演示用途。进度通过 AssetMetadata 的 `demoStep` 持久化，讲解、来源与审计记录复用现有表，无需新增迁移。单步事务和重复请求检查防止重复创建版本。
+
+第六步暂停，等待用户明确确认模拟人工审核；只有已审核讲解才能发布到现有 `/exhibit/[id]`。游客页面标记演示用途，图片接口只允许固定目录白名单中的演示图片。重置仅清理三个演示样本的关联记录，保留正常馆藏。

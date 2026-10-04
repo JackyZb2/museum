@@ -2,16 +2,17 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '../../../../../lib/prisma';
 import { imageFileName, readImage, readTags } from '../../../../../lib/assets';
 import { getAIProvider } from '../../../../../lib/ai';
+import { withApiErrors } from '../../../../../lib/api-errors';
 
 export const runtime = 'nodejs';
 export const maxDuration = 90;
 type Context = { params: Promise<{ id: string }> };
 
-export async function POST(_request: NextRequest, context: Context) {
+export const POST = withApiErrors(async (_request: NextRequest, context: Context) => {
   const { id } = await context.params;
   const asset = await prisma.museumAsset.findUnique({
     where: { id },
-    include: { sourceDocuments: { orderBy: { createdAt: 'asc' } } },
+    include: { sourceDocuments: { orderBy: { createdAt: 'asc' } }, metadata: true },
   });
   if (!asset) return NextResponse.json({ error: '未找到文物。' }, { status: 404 });
   if (asset.status === 'PUBLISHED')
@@ -19,10 +20,18 @@ export async function POST(_request: NextRequest, context: Context) {
   const fileName = imageFileName(asset.imageUrl);
   if (!fileName) return NextResponse.json({ error: '请先上传文物图片。' }, { status: 400 });
 
+  const claimTime = new Date();
+  const previousStatus = asset.status === 'PROCESSING' ? 'DRAFT' : asset.status;
   const changed = await prisma.$transaction(async (tx) => {
     const updated = await tx.museumAsset.updateMany({
-      where: { id, status: { notIn: ['PROCESSING', 'PUBLISHED'] } },
-      data: { status: 'PROCESSING' },
+      where: {
+        id,
+        OR: [
+          { status: { notIn: ['PROCESSING', 'PUBLISHED'] } },
+          { status: 'PROCESSING', updatedAt: { lt: new Date(Date.now() - 5 * 60_000) } },
+        ],
+      },
+      data: { status: 'PROCESSING', updatedAt: claimTime },
     });
     if (updated.count)
       await tx.auditLog.create({
@@ -36,26 +45,39 @@ export async function POST(_request: NextRequest, context: Context) {
     return updated.count;
   });
   if (!changed)
-    return NextResponse.json({ error: '该文物正在分析，请稍后再试。' }, { status: 409 });
+    return NextResponse.json(
+      { error: '该文物正在分析，请勿重复提交。若服务曾中断，五分钟后可重新分析。' },
+      { status: 409 },
+    );
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       const encoder = new TextEncoder();
+      let disconnected = false;
       const emit = (
         step: string,
         status: 'started' | 'done' | 'error' = 'done',
         message?: string,
       ) => {
-        controller.enqueue(encoder.encode(`${JSON.stringify({ step, status, message })}\n`));
+        if (!disconnected) {
+          try {
+            controller.enqueue(encoder.encode(`${JSON.stringify({ step, status, message })}\n`));
+          } catch {
+            disconnected = true;
+          }
+        }
       };
       try {
         emit('读取图片', 'started');
-        const { bytes, mime } = await readImage(fileName);
+        const { bytes, mime } = await readImage(fileName).catch(() => {
+          throw new Error('无法读取文物图片，文件可能已丢失或损坏。请核对本地图片存储后重试。');
+        });
         const imageUrl = `data:${mime};base64,${bytes.toString('base64')}`;
         emit('读取图片');
 
         emit('解析资料', 'started');
         const sourceText = asset.sourceDocuments
+          .filter((document) => Boolean(document.extractedText?.trim()))
           .map((document) => `${document.title}：${document.extractedText ?? ''}`)
           .join('\n\n')
           .slice(0, 16_000);
@@ -70,7 +92,11 @@ export async function POST(_request: NextRequest, context: Context) {
         emit(
           'AI视觉分析',
           'done',
-          visual.source === 'fallback' ? '模型未返回可信结构，已使用安全回退结果。' : undefined,
+          visual.source === 'fallback'
+            ? 'AI 服务不可用、返回空结果或结构无效；已安全回退，请人工核对。'
+            : provider.name === 'mock'
+              ? '当前使用模拟模型（演示模式或未配置密钥），不代表真实识图。'
+              : undefined,
         );
 
         emit('提取标签', 'started');
@@ -84,7 +110,7 @@ export async function POST(_request: NextRequest, context: Context) {
         emit('提取标签');
 
         emit('生成结构化元数据', 'started');
-        const entries: [string, string][] = [
+        let entries: [string, string][] = [
           ['aiCategory', visual.category],
           ['aiMaterial', visual.material],
           ['visualDescription', visual.visualDescription],
@@ -97,14 +123,27 @@ export async function POST(_request: NextRequest, context: Context) {
           ['documentRawOutput', documentMetadata?.rawOutput ?? ''],
           ['documentSummary', documentMetadata?.description ?? '资料中未提供'],
         ];
+        if (
+          visual.source === 'fallback' &&
+          asset.metadata.some((item) => item.key === 'visualDescription' && item.value.trim())
+        ) {
+          entries = [
+            ['lastAnalysisWarning', '本次模型分析失败，已保留上次知识卡结果，请人工核对。'],
+            ['lastFailedImageRawOutput', visual.rawOutput || ''],
+          ];
+        }
         await prisma.$transaction(async (tx) => {
+          const completed = await tx.museumAsset.updateMany({
+            where: { id, status: 'PROCESSING', updatedAt: claimTime },
+            data: { status: 'REVIEW_REQUIRED' },
+          });
+          if (completed.count !== 1) throw new Error('分析任务状态已变化');
           await tx.assetMetadata.deleteMany({
             where: { museumAssetId: id, key: { in: entries.map(([key]) => key) } },
           });
           await tx.assetMetadata.createMany({
             data: entries.map(([key, value]) => ({ museumAssetId: id, key, value })),
           });
-          await tx.museumAsset.update({ where: { id }, data: { status: 'REVIEW_REQUIRED' } });
           await tx.auditLog.create({
             data: {
               action: 'AI_ANALYSIS_COMPLETED',
@@ -121,24 +160,37 @@ export async function POST(_request: NextRequest, context: Context) {
         });
         emit('生成结构化元数据');
         emit('完成');
-      } catch {
+      } catch (error) {
         await prisma
           .$transaction(async (tx) => {
-            await tx.museumAsset.update({ where: { id }, data: { status: 'DRAFT' } });
+            await tx.museumAsset.updateMany({
+              where: { id, status: 'PROCESSING', updatedAt: claimTime },
+              data: { status: previousStatus },
+            });
             await tx.auditLog.create({
               data: {
                 action: 'AI_ANALYSIS_FAILED',
                 entityType: 'MuseumAsset',
                 entityId: id,
                 actor: '系统',
-                details: '分析未完成，已恢复草稿状态。',
+                details: '分析未完成，已尝试恢复分析前状态，已有元数据未覆盖。',
               },
             });
           })
           .catch(() => {});
-        emit('分析失败', 'error', '分析未完成，请检查图片和服务配置后重试。');
+        emit(
+          '分析失败',
+          'error',
+          error instanceof Error && error.message.startsWith('无法读取文物图片')
+            ? error.message
+            : '分析未完成，请检查图片和本地数据库后重试。已有资料未清空；若仍显示处理中，请恢复数据库连接后刷新确认。',
+        );
       } finally {
-        controller.close();
+        try {
+          controller.close();
+        } catch {
+          /* The client may have disconnected. */
+        }
       }
     },
   });
@@ -149,4 +201,4 @@ export async function POST(_request: NextRequest, context: Context) {
       'X-Content-Type-Options': 'nosniff',
     },
   });
-}
+});

@@ -1,7 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
+import { userError } from '../lib/client-errors';
+import { StatusBadge } from './ui/StatusBadge';
+import { Feedback } from './ui/Feedback';
+import { EmptyState } from './ui/PageState';
 
 type NarrationItem = {
   id: string;
@@ -23,6 +27,7 @@ export function NarrationPanel({ assetId }: { assetId: string }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const locked = useRef(false);
 
   const load = useCallback(async () => {
     const response = await fetch(`/api/assets/${assetId}/narrations`, { cache: 'no-store' });
@@ -32,11 +37,13 @@ export function NarrationPanel({ assetId }: { assetId: string }) {
 
   useEffect(() => {
     void load().catch((reason) =>
-      setError(reason instanceof Error ? reason.message : '讲解加载失败。'),
+      setError(userError(reason, '讲解加载失败，请检查本地服务后重试。')),
     );
   }, [load]);
 
   async function generate() {
+    if (locked.current) return;
+    locked.current = true;
     setBusy(true);
     setError('');
     setNotice('');
@@ -59,8 +66,9 @@ export function NarrationPanel({ assetId }: { assetId: string }) {
             : '已保存四个 AI 讲解版本。请按来源资料逐条审核。',
       );
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '讲解生成失败。');
+      setError(userError(reason, '讲解生成失败，已填写资料保留。'));
     } finally {
+      locked.current = false;
       setBusy(false);
     }
   }
@@ -85,6 +93,7 @@ export function NarrationPanel({ assetId }: { assetId: string }) {
           rows={5}
           maxLength={12000}
           value={staffSourceText}
+          disabled={busy}
           onChange={(event) => setStaffSourceText(event.target.value)}
           placeholder="粘贴可核实的馆藏资料；不要填写未经确认的历史推测。"
         />
@@ -98,17 +107,26 @@ export function NarrationPanel({ assetId }: { assetId: string }) {
         {busy ? '正在生成四种讲解……' : '生成 AI 讲解'}
       </button>
       {error && (
-        <p role="alert" className="mt-4 rounded-lg bg-red-50 p-3 text-red-700">
-          {error}
-        </p>
+        <div className="mt-4">
+          <Feedback tone="error">{error}</Feedback>
+        </div>
       )}
       {notice && (
-        <p role="status" className="mt-4 rounded-lg bg-cyan-50 p-3 text-cyan-800">
-          {notice}
-        </p>
+        <div className="mt-4">
+          <Feedback
+            tone={notice.includes('模拟') || notice.includes('受限') ? 'warning' : 'success'}
+          >
+            {notice}
+          </Feedback>
+        </div>
       )}
       {items.length === 0 ? (
-        <p className="muted mt-6">尚未生成讲解。</p>
+        <div className="mt-6">
+          <EmptyState
+            title="讲解尚未生成"
+            description="准备来源资料后，可生成四种面向不同观众的讲解草稿。生成后必须由工作人员审核。"
+          />
+        </div>
       ) : (
         <div className="mt-6 space-y-5">
           {items.map((item) => (
@@ -117,15 +135,7 @@ export function NarrationPanel({ assetId }: { assetId: string }) {
                 <h3 className="text-lg font-bold">
                   {item.title} · 第 {item.version} 版
                 </h3>
-                <span
-                  className={`text-sm font-semibold ${item.status === 'APPROVED' ? 'text-emerald-800' : 'text-amber-800'}`}
-                >
-                  {item.status === 'APPROVED'
-                    ? '已审核'
-                    : item.status === 'EDITED'
-                      ? '已人工编辑 · 待审核'
-                      : 'AI生成 · 待人工审核'}
-                </span>
+                <StatusBadge status={item.status} />
               </div>
               {item.isLimited && (
                 <p className="mt-2 text-sm text-amber-800">
@@ -137,7 +147,7 @@ export function NarrationPanel({ assetId }: { assetId: string }) {
                   模拟演示内容，不代表真实 AI 生成或历史鉴定。
                 </p>
               )}
-              <p className="mt-4 whitespace-pre-wrap leading-8">{item.content}</p>
+              <p className="reading-copy mt-4 whitespace-pre-wrap text-stone-700">{item.content}</p>
               <div className="mt-5 border-t pt-4 text-sm">
                 <h4 className="font-bold">内容依据</h4>
                 {item.sourceDocuments.length ? (

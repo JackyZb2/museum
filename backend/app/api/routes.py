@@ -5,6 +5,8 @@ from app.db.session import get_db
 from app.models.entities import Artifact, Asset, Document, Museum
 from app.schemas.entities import *
 from app.services.storage import DOCUMENT_EXTENSIONS, IMAGE_EXTENSIONS, save_upload
+from pathlib import Path
+from app.services.operations import is_uploading, upload_operation
 router = APIRouter()
 def ok(data): return {"success": True, "data": data}
 @router.get("/museums")
@@ -42,17 +44,34 @@ def update_artifact(artifact_id: int, payload: ArtifactCreate, db: Session = Dep
 def delete_artifact(artifact_id: int, db: Session = Depends(get_db)):
     item = db.get(Artifact, artifact_id)
     if not item: raise HTTPException(404, "未找到文物")
+    if is_uploading(artifact_id) or item.assets or item.documents:
+        raise HTTPException(409, "文物仍关联数字资产或来源资料，不能直接删除。请先核对并处理关联记录。")
     db.delete(item); db.commit() # TODO: delete object-storage files in a future storage service.
     return ok({"deleted": True})
 async def upload_file(artifact_id: int, file: UploadFile, db: Session, allowed: set[str], kind: str):
+    with upload_operation(artifact_id):
+        return await _upload_file(artifact_id, file, db, allowed, kind)
+
+async def _upload_file(artifact_id: int, file: UploadFile, db: Session, allowed: set[str], kind: str):
     if not db.get(Artifact, artifact_id): raise HTTPException(404, "未找到文物")
     try: filename, path, size = await save_upload(file, artifact_id, allowed)
     except ValueError as e: raise HTTPException(400, str(e))
+    except OSError: raise HTTPException(503, "文件存储不可用，上传未完成，请保留所选文件后重试。")
     common = dict(artifact_id=artifact_id, filename=filename, original_filename=file.filename or filename, file_path=path, mime_type=file.content_type or "application/octet-stream", file_size=size)
     if kind == "asset": item = Asset(**common)
     else:
         suffix = filename.rsplit(".", 1)[-1]; item = Document(**common, document_type="word" if suffix in {"doc", "docx"} else suffix)
-    db.add(item); db.commit(); db.refresh(item); return ok((AssetOut if kind == "asset" else DocumentOut).model_validate(item))
+    try:
+        db.add(item); db.commit()
+    except Exception:
+        db.rollback()
+        Path(path).unlink(missing_ok=True)
+        raise
+    db.refresh(item)
+    response = ok((AssetOut if kind == "asset" else DocumentOut).model_validate(item))
+    if kind == "document" and item.document_type == "pdf":
+        response["warning"] = "本版本仅保存 PDF，不提取文字（含扫描件）。请手动粘贴来源文字，不能将上传成功视为解析成功。"
+    return response
 @router.post("/artifacts/{artifact_id}/assets", status_code=201)
 async def upload_asset(artifact_id: int, file: UploadFile = File(...), db: Session = Depends(get_db)): return await upload_file(artifact_id, file, db, IMAGE_EXTENSIONS, "asset")
 @router.post("/artifacts/{artifact_id}/documents", status_code=201)

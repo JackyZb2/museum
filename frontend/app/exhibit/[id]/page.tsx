@@ -3,36 +3,46 @@ import Image from 'next/image';
 import { notFound } from 'next/navigation';
 import { ExhibitTabs } from '../../../components/ExhibitTabs';
 import { prisma } from '../../../lib/prisma';
+import { DEMO_MUSEUM_ID, DEMO_NOTICE } from '../../../lib/demo/catalog';
+import { ServiceUnavailable } from '../../../components/ServiceUnavailable';
+import { StatusBadge } from '../../../components/ui/StatusBadge';
 
 export const dynamic = 'force-dynamic';
 type Context = { params: Promise<{ id: string }> };
 const order = ['GENERAL', 'CHILDREN', 'PROFESSIONAL', 'SHORT'];
 
 async function findPublished(id: string) {
-  return prisma.museumAsset.findFirst({
-    where: { id, status: 'PUBLISHED' },
-    select: {
-      id: true,
-      name: true,
-      dynasty: true,
-      material: true,
-      description: true,
-      imageUrl: true,
-      museum: { select: { name: true } },
-      narrations: {
-        where: { status: 'APPROVED' },
-        orderBy: { version: 'desc' },
-        select: { variant: true, version: true, content: true },
+  return prisma.museumAsset
+    .findFirst({
+      where: { id, status: 'PUBLISHED' },
+      select: {
+        id: true,
+        name: true,
+        dynasty: true,
+        material: true,
+        description: true,
+        imageUrl: true,
+        museum: { select: { id: true, name: true } },
+        narrations: {
+          where: { status: 'APPROVED' },
+          orderBy: { version: 'desc' },
+          select: { variant: true, version: true, content: true },
+        },
       },
-    },
-  });
+    })
+    .catch(() => undefined);
 }
 
 export async function generateMetadata({ params }: Context): Promise<Metadata> {
   const { id } = await params;
   const asset = await findPublished(id);
   return {
-    title: asset ? `${asset.name}｜数字展厅` : '展品未开放｜数字展厅',
+    title:
+      asset === undefined
+        ? '展厅暂时不可用'
+        : asset
+          ? `${asset.name}｜数字展厅`
+          : '展品未开放｜数字展厅',
     description: asset ? `了解${asset.name}的馆藏信息与人工审核讲解。` : '此展品尚未开放。',
   };
 }
@@ -40,6 +50,8 @@ export async function generateMetadata({ params }: Context): Promise<Metadata> {
 export default async function ExhibitPage({ params }: Context) {
   const { id } = await params;
   const asset = await findPublished(id);
+  if (asset === undefined)
+    return <ServiceUnavailable retryPath={`/exhibit/${encodeURIComponent(id)}`} />;
   if (!asset || asset.narrations.length === 0) notFound();
   const latest = order.flatMap((variant) => {
     const item = asset.narrations.find((narration) => narration.variant === variant);
@@ -58,6 +70,11 @@ export default async function ExhibitPage({ params }: Context) {
             线上展厅
           </span>
         </header>
+        {asset.museum.id === DEMO_MUSEUM_ID && (
+          <p className="mt-6 rounded-lg border border-amber-300 bg-amber-50 p-4 text-amber-900">
+            {DEMO_NOTICE} 图片为演示示意图，并非真实馆藏照片。
+          </p>
+        )}
         <div className="mt-8 grid items-start gap-8 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)] lg:gap-12">
           <div className="overflow-hidden rounded-2xl border border-stone-200 bg-[#eee9df]">
             {asset.imageUrl ? (
@@ -68,7 +85,7 @@ export default async function ExhibitPage({ params }: Context) {
                 height={1200}
                 unoptimized
                 priority
-                className="h-auto max-h-[70vh] w-full object-contain"
+                className="h-auto max-h-[70vh] w-full object-contain p-4 sm:p-7"
               />
             ) : (
               <div className="flex min-h-72 items-center justify-center text-stone-500">
@@ -78,9 +95,12 @@ export default async function ExhibitPage({ params }: Context) {
           </div>
           <section className="pt-1 lg:pt-8">
             <p className="text-sm tracking-[0.2em] text-[#865d3b]">馆藏文物</p>
-            <h1 className="mt-4 font-serif text-4xl font-semibold leading-tight sm:text-5xl">
+            <h1 className="museum-title mt-4 text-4xl font-semibold leading-tight sm:text-5xl">
               {asset.name}
             </h1>
+            <div className="mt-4">
+              <StatusBadge status="APPROVED" label="馆方已审核讲解" />
+            </div>
             <div className="mt-8 grid grid-cols-2 gap-5 border-y border-stone-300 py-6">
               <div>
                 <h2 className="text-sm text-stone-500">年代</h2>
@@ -92,7 +112,7 @@ export default async function ExhibitPage({ params }: Context) {
               </div>
             </div>
             <h2 className="mt-8 font-serif text-2xl font-semibold">基础介绍</h2>
-            <p className="mt-4 whitespace-pre-wrap leading-8 text-stone-700">
+            <p className="reading-copy mt-4 whitespace-pre-wrap text-stone-700">
               {asset.description || '资料中未提供相关信息。'}
             </p>
           </section>

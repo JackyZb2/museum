@@ -1,5 +1,19 @@
 # MuseumAI Studio 当前状态审计
 
+## 当前验收快照（2026-10-04，以本节为准）
+
+项目主工作区为 `D:\Codex\projects\MuseumAI-Studio`。以下旧审计保留为历史基线，其中“AI/审核未实现”“无测试”“首页依赖 FastAPI”等已不代表当前实现。
+
+- Current Architecture：Next.js 15.5.26、React 19、TypeScript strict、Tailwind、Prisma 6/SQLite；新核心工作流由 Next.js 服务端 API 和 AI Provider 承担。旧 FastAPI/SQLAlchemy 独立保留，不是新流程启动必需服务。
+- Existing Features：中文首页与 Dashboard、知识卡新增与真实图片上传、文字来源、六步分析、标签与字段编辑、四版讲解、版本与来源关联、人工审核、发布、游客展示、三个离线演示样本、异常反馈和审计日志。
+- Reusable Components：统一 Provider、Prompt 与结构校验，Prisma 模型/迁移，知识卡/审核/发布 API，以及共享 Layout、Badge、Feedback、Progress、Empty/Loading 组件。
+- Missing Features：新流程资料文件上传/PDF 正文解析、授权确认及发布授权门槛、登录/角色/多馆隔离、生产存储与运维。Mock 并非真实识图。
+- Technical Risks：后台无认证；两套数据库互不查询；有资料支持不等于自动消除模型幻觉；本地 SQLite 与磁盘需备份；脚本缓存运行时路径与机器有关。
+- MVP Gap Analysis：已实现的本地展示闭环通过接口与浏览器检查，但本次清单的“上传馆藏资料文件”和“确认授权”未通过，不能宣称全部验收完成。真实模型质量没有使用付费外部 API 验证。
+- Recommended Development Order：本阶段到此停止。后续仅在明确授权新阶段后，先补资料导入/授权和权限，再考虑生产化与扩展场景。
+
+两条 Prisma migration 在隔离数据库成功应用；无新增业务表或迁移。最终命令、证据和边界见 [MVP_FINAL_REPORT.md](MVP_FINAL_REPORT.md)。
+
 > 审计日期：2026-09-30
 > 仓库：`D:\Codex\projects\MuseumAI-Studio`
 > 后续更新：同日完成基础架构与 Prisma/SQLite 数据库阶段。下文原审计中的“未发现 Prisma”描述是实施前基线；当前状态以“本阶段实施更新”小节为准。

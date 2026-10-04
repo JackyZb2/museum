@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from app.api.routes import router
 from app.core.config import settings
 from app.db.session import Base, SessionLocal, engine
@@ -28,6 +29,9 @@ app = FastAPI(title="MuseumAI Studio API", version="0.1.0", lifespan=lifespan)
 async def validation_error(request: Request, exc: RequestValidationError): return JSONResponse(status_code=422, content={"success": False, "message": "提交内容校验失败", "details": exc.errors()})
 @app.exception_handler(Exception)
 async def server_error(request: Request, exc: Exception): return JSONResponse(status_code=500, content={"success": False, "message": "服务器内部错误"})
+@app.exception_handler(SQLAlchemyError)
+async def database_error(request: Request, exc: SQLAlchemyError):
+    return JSONResponse(status_code=503, content={"success": False, "message": "数据库暂不可用，操作未完成。请保留已填写内容，检查本地服务后重试。"})
 app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:3000"], allow_methods=["*"], allow_headers=["*"])
 app.mount("/uploads", StaticFiles(directory=settings.upload_dir), name="uploads")
 app.include_router(router, prefix="/api")

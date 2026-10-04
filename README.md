@@ -1,14 +1,55 @@
 # MuseumAI Studio
 
+## MVP 最终验收（2026-10-04）
+
+当前是可在可信本地环境演示的 MVP，不是生产发布版本。新增、图片上传、来源文字、分析、四种讲解、人工编辑与审核、发布、游客展示闭环已验证；**新流程馆藏资料文件上传与授权确认尚未实现，严格全项验收未通过**。详见 [最终验收报告](MVP_FINAL_REPORT.md)、[当前状态](CURRENT_STATE.md)、[产品概览](docs/product-overview.md) 和 [后续规划](ROADMAP.md)。
+
+首页 `/`，工作台 `/dashboard`，标准流程 `/assets/new`，离线演示 `/demo`。新核心流程只需 Next.js 本地服务和 SQLite，**无需 Docker，也无需启动 Python 后端**；下方双终端说明只在同时使用旧 `/artifacts` 功能时需要。
+
+首次准备：安装兼容 Node.js（至少 20.9，建议已受支持的版本）和 pnpm，在项目根目录仅当 `frontend/.env` 不存在时复制 `.env.example`，避免覆盖已有密钥：
+
+```powershell
+cd D:\Codex\projects\MuseumAI-Studio
+if (-not (Test-Path frontend/.env)) { Copy-Item .env.example frontend/.env }
+cd frontend
+pnpm install --frozen-lockfile
+pnpm db:generate
+pnpm db:deploy
+pnpm db:seed
+pnpm dev
+```
+
+已安装环境日常启动：在项目根目录执行 `.\frontend\run-local.ps1`。无系统 Node/pnpm 时，该脚本会尝试本机 Codex 缓存运行时；此回退路径并不适用于每台电脑。
+
+断网前完成依赖安装、迁移和客户端生成。`DEMO_MODE=true` 或未配置 `AI_API_KEY` 使用 Mock；`/demo` 无论全局配置如何都使用本地模拟模型。普通业务配置真实密钥后若 AI 断连，讲解会提示失败，不会悄悄伪造真实生成结果，此时请使用 `/demo`。
+
+最终验收命令（在 `frontend` 目录，隔离数据库与上传目录）：
+
+```powershell
+$env:MUSEUMAI_BUILD_DIR = '.next-publish-test'
+pnpm lint
+pnpm typecheck
+pnpm build
+pnpm test:ai
+pnpm test:mvp
+pnpm test:demo
+pnpm test:stability
+Remove-Item Env:MUSEUMAI_BUILD_DIR
+```
+
+`test:mvp` 使用 33160 端口。自动接口耗时不等于人工演示耗时；本次浏览器标准闭环实测约 71 秒，未包含缺失的资料文件上传与授权确认。不要把这两个缺失项展示为已完成。
+
 新用户请先阅读 [当前功能与使用说明](docs/USER_GUIDE.md)，包含 D 盘项目的 PyCharm 环境设置、启动方法与 AI 知识卡操作。
 
-下载本版本完整源码：[MuseumAI-Studio-v0.2.0-source.zip](MuseumAI-Studio-v0.2.0-source.zip)。压缩包不包含本地密钥、数据库、上传文件或依赖目录。
+创业答辩请打开 `/demo`，并阅读 [三分钟离线演示脚本](docs/demo-script.md)。提供青铜鼎、青花瓷瓶、陶俑三个本地演示样本，可完成分析、四种讲解、人工确认、发布和游客浏览，无需真实 AI 或互联网。首次安装依赖与迁移请在断网前完成，演示仅需前端本地服务。
+
+下载本版本完整源码：[MuseumAI-Studio-v0.3.0-source.zip](MuseumAI-Studio-v0.3.0-source.zip)。压缩包不包含本地密钥、数据库、上传文件、依赖目录或旧版压缩包。版本说明见 [v0.3.0](docs/releases/v0.3.0.md)。
 
 MuseumAI Studio 是面向博物馆数字资产管理与文化内容工作的开源项目。当前版本保留已有文物管理演示，并提供中文后台、Prisma/SQLite 核心数据模型，以及基于 AI Provider 的文物知识卡分析流程。
 
 ## 本地运行（无需 Docker）
 
-需要 Python 3.12 或兼容版本，以及 Node.js。首次运行前，在项目根目录执行：
+仅使用旧版馆藏管理时需要 Python 3.12 或兼容版本，以及 Node.js。下列配置复制前请确认目标文件不存在，避免覆盖已有配置：
 
 ```powershell
 Copy-Item .env.example frontend/.env
@@ -45,6 +86,8 @@ pnpm db:seed      # 写入最小工作区种子
 ```
 
 ## 质量检查
+
+异常处理与稳定性检查结果见 [QA 报告](QA_REPORT.md)。前端图片完整性校验使用 Sharp，Node.js 需要 20.9 或更新版本。
 
 ```powershell
 pnpm lint

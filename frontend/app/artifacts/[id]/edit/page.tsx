@@ -8,19 +8,27 @@ export default function Edit() {
   const p = useParams<{ id: string }>(),
     r = useRouter();
   const [form, setForm] = useState<ArtifactFormValues | null>(null);
+  const [error, setError] = useState('');
   useEffect(() => {
-    getArtifact(p.id).then((a) =>
-      setForm({
-        name: a.name,
-        dynasty: a.dynasty || '',
-        category: a.category || '',
-        material: a.material || '',
-        inventory_number: a.inventory_number || '',
-        description: a.description || '',
-      }),
-    );
+    getArtifact(p.id)
+      .then((a) =>
+        setForm({
+          name: a.name,
+          dynasty: a.dynasty || '',
+          category: a.category || '',
+          material: a.material || '',
+          inventory_number: a.inventory_number || '',
+          description: a.description || '',
+        }),
+      )
+      .catch((reason) => setError(reason instanceof Error ? reason.message : '文物加载失败。'));
   }, [p.id]);
-  if (!form) return <div className="muted">正在加载……</div>;
+  if (!form)
+    return (
+      <div role="status" className="muted">
+        {error || '正在加载……'}
+      </div>
+    );
   return (
     <ArtifactForm
       title="编辑文物"

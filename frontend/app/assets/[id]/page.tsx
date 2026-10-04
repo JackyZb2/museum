@@ -2,10 +2,15 @@
 
 import Image from 'next/image';
 import Link from 'next/link';
-import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { NarrationPanel } from '../../../components/NarrationPanel';
 import { PublishControl } from '../../../components/PublishControl';
+import { userError } from '../../../lib/client-errors';
+import { StatusBadge } from '../../../components/ui/StatusBadge';
+import { Feedback } from '../../../components/ui/Feedback';
+import { EmptyState, LoadingState } from '../../../components/ui/PageState';
+import { WorkflowProgress } from '../../../components/ui/WorkflowProgress';
 
 type KnowledgeCard = {
   id: string;
@@ -43,13 +48,6 @@ type KnowledgeCard = {
 };
 
 const steps = ['读取图片', '解析资料', 'AI视觉分析', '提取标签', '生成结构化元数据', '完成'];
-const labels: Record<string, string> = {
-  DRAFT: '草稿',
-  PROCESSING: '处理中',
-  REVIEW_REQUIRED: '待人工审核',
-  APPROVED: '已通过',
-  PUBLISHED: '已发布',
-};
 const fields = [
   ['name', '文物名称'],
   ['inventoryNumber', '藏品编号'],
@@ -78,21 +76,27 @@ export default function KnowledgeCardPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const dirty = useRef(false);
+  const analysisLock = useRef(false);
+  const saveLock = useRef(false);
+  const currentId = useRef(id);
 
   const load = useCallback(async () => {
     const response = await fetch(`/api/assets/${id}`, { cache: 'no-store' });
     if (!response.ok) throw new Error(await responseError(response));
     const data: KnowledgeCard = await response.json();
+    if (currentId.current !== id) return;
     setAsset(data);
-    setForm({
-      name: data.name,
-      inventoryNumber: data.inventoryNumber || '',
-      category: data.category || '',
-      dynasty: data.dynasty || '',
-      material: data.material || '',
-      dimensions: data.dimensions || '',
-      description: data.description || '',
-    });
+    if (!dirty.current)
+      setForm({
+        name: data.name,
+        inventoryNumber: data.inventoryNumber || '',
+        category: data.category || '',
+        dynasty: data.dynasty || '',
+        material: data.material || '',
+        dimensions: data.dimensions || '',
+        description: data.description || '',
+      });
     setTags(
       data.metadata.reviewedTags ?? [
         ...new Set([...data.metadata.aiTags, ...data.metadata.manualTags]),
@@ -101,12 +105,18 @@ export default function KnowledgeCardPage() {
   }, [id]);
 
   useEffect(() => {
+    currentId.current = id;
+    dirty.current = false;
+    setAsset(null);
+    setForm(null);
     void load().catch((reason) =>
-      setError(reason instanceof Error ? reason.message : '加载失败。'),
+      setError(userError(reason, '文物加载失败，请检查链接和本地服务。')),
     );
-  }, [load]);
+  }, [load, id]);
 
   async function analyze() {
+    if (analysisLock.current) return;
+    analysisLock.current = true;
     setError('');
     setNotice('');
     setProgress({});
@@ -120,6 +130,7 @@ export default function KnowledgeCardPage() {
       const decoder = new TextDecoder();
       let buffer = '';
       let completed = false;
+      let warning = '';
       while (true) {
         const { done, value } = await reader.read();
         buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
@@ -129,7 +140,10 @@ export default function KnowledgeCardPage() {
           if (!line.trim()) continue;
           const event: { step: string; status: string; message?: string } = JSON.parse(line);
           setProgress((current) => ({ ...current, [event.step]: event.status }));
-          if (event.message) setNotice(event.message);
+          if (event.message) {
+            warning = event.message;
+            setNotice(event.message);
+          }
           if (event.status === 'error') throw new Error(event.message || '分析失败。');
           if (event.step === '完成') completed = true;
         }
@@ -138,18 +152,22 @@ export default function KnowledgeCardPage() {
       if (!completed) throw new Error('分析连接中断，请刷新页面查看状态。');
       await load();
       router.refresh();
-      setNotice('分析完成。请人工核对后再使用知识卡内容。');
+      setNotice(
+        `${warning ? warning + ' ' : ''}分析完成。请人工核对后再使用知识卡内容。未保存的表单内容已保留。`,
+      );
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '分析失败。');
+      setError(userError(reason, '分析失败，已填写内容保留。'));
       await load().catch(() => {});
     } finally {
+      analysisLock.current = false;
       setBusy(false);
     }
   }
 
   async function saveFields(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!form) return;
+    if (!form || saveLock.current) return;
+    saveLock.current = true;
     setError('');
     setSaving(true);
     try {
@@ -159,12 +177,14 @@ export default function KnowledgeCardPage() {
         body: JSON.stringify(form),
       });
       if (!response.ok) throw new Error(await responseError(response));
+      dirty.current = false;
       await load();
       router.refresh();
       setNotice('基本信息已保存。');
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '保存失败。');
+      setError(userError(reason, '保存失败，已填写内容保留。'));
     } finally {
+      saveLock.current = false;
       setSaving(false);
     }
   }
@@ -182,10 +202,15 @@ export default function KnowledgeCardPage() {
   }
 
   if (!asset || !form)
-    return (
-      <div role="status" className="muted">
-        {error || '正在加载文物知识卡……'}
-      </div>
+    return error ? (
+      <Feedback tone="error" title="文物暂时无法读取">
+        {error}
+        <Link href="/assets" className="mt-3 block underline">
+          返回文物列表
+        </Link>
+      </Feedback>
+    ) : (
+      <LoadingState label="正在加载文物知识卡…" />
     );
   return (
     <>
@@ -194,9 +219,13 @@ export default function KnowledgeCardPage() {
       </Link>
       <header className="mt-3 mb-7 flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold">{asset.name}</h1>
-          <p className="muted mt-2">状态：{labels[asset.status] || asset.status}</p>
-          <p className="muted mt-1">
+          <p className="eyebrow">文物知识卡 / 资料与人工确认</p>
+          <h1 className="museum-title mt-2 text-3xl font-semibold">{asset.name}</h1>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <StatusBadge status={asset.status} />
+            {asset.authorizationStatus === 'DEMO_ONLY' && <StatusBadge status="DEMO" />}
+          </div>
+          <p className="muted mt-3 text-sm">
             讲解审核：{asset.narrationReview.filter((item) => item.status === 'APPROVED').length}/4
             个最新版本已审核
           </p>
@@ -214,7 +243,7 @@ export default function KnowledgeCardPage() {
           <button
             type="button"
             onClick={() => void analyze()}
-            disabled={busy || asset.status === 'PROCESSING' || asset.status === 'PUBLISHED'}
+            disabled={busy || asset.status === 'PUBLISHED'}
             className="button border bg-white disabled:opacity-50"
           >
             {busy ? '正在分析……' : '开始 AI 分析'}
@@ -222,14 +251,20 @@ export default function KnowledgeCardPage() {
         </div>
       </header>
       {error && (
-        <p role="alert" className="mb-5 rounded-lg bg-red-50 p-4 text-red-700">
-          {error}
-        </p>
+        <div className="mb-5">
+          <Feedback tone="error" title="操作未完成">
+            {error}
+          </Feedback>
+        </div>
       )}
       {notice && (
-        <p role="status" className="mb-5 rounded-lg bg-cyan-50 p-4 text-cyan-800">
-          {notice}
-        </p>
+        <div className="mb-5">
+          <Feedback
+            tone={notice.includes('回退') || notice.includes('模拟') ? 'warning' : 'success'}
+          >
+            {notice}
+          </Feedback>
+        </div>
       )}
       {asset.status === 'PROCESSING' && !busy && (
         <p className="mb-5 rounded-lg bg-amber-50 p-4 text-amber-800">
@@ -238,17 +273,22 @@ export default function KnowledgeCardPage() {
       )}
       {Object.keys(progress).length > 0 && (
         <section className="card mb-6 p-6" aria-label="AI 分析进度">
-          <h2 className="mb-4 text-lg font-bold">分析进度</h2>
-          <ol className="grid gap-3 sm:grid-cols-2">
-            {steps.map((step) => (
-              <li key={step} className="flex items-center gap-2 text-sm">
-                <span aria-hidden="true" className="w-6 text-center">
-                  {progress[step] === 'done' ? '✓' : progress[step] === 'started' ? '◌' : '·'}
-                </span>
-                <span className={progress[step] ? 'font-semibold' : 'muted'}>{step}</span>
-              </li>
-            ))}
-          </ol>
+          <h2 className="mb-2 text-lg font-semibold">AI 处理进度</h2>
+          <p className="muted mb-5 text-xs">完成分析后进入待审核状态，不会自动确认历史事实。</p>
+          <WorkflowProgress
+            label="文物分析"
+            steps={steps.map((title) => ({
+              title,
+              state:
+                progress[title] === 'done'
+                  ? 'DONE'
+                  : progress[title] === 'started'
+                    ? error
+                      ? 'ERROR'
+                      : 'PROCESSING'
+                    : 'WAITING',
+            }))}
+          />
         </section>
       )}
       <div className="grid gap-6 xl:grid-cols-3">
@@ -265,6 +305,11 @@ export default function KnowledgeCardPage() {
                 className="w-full object-contain bg-slate-100"
               />
             )}
+            {!asset.imageUrl && (
+              <div className="px-5 pb-5">
+                <EmptyState title="暂无文物图片" description="图片尚未提供，暂不能进行视觉分析。" />
+              </div>
+            )}
           </section>
           <section className="card p-6">
             <h2 className="mb-3 text-lg font-bold">来源资料</h2>
@@ -278,7 +323,10 @@ export default function KnowledgeCardPage() {
                 </div>
               ))
             ) : (
-              <p className="muted">资料中未提供</p>
+              <EmptyState
+                title="尚无来源资料"
+                description="未提供资料时，讲解只能使用受限内容，不推断精确年代或历史背景。"
+              />
             )}
           </section>
         </div>
@@ -295,7 +343,11 @@ export default function KnowledgeCardPage() {
                       maxLength={120}
                       className="mt-2 w-full rounded-lg border p-3 font-normal"
                       value={form[key]}
-                      onChange={(event) => setForm({ ...form, [key]: event.target.value })}
+                      disabled={saving}
+                      onChange={(event) => {
+                        dirty.current = true;
+                        setForm({ ...form, [key]: event.target.value });
+                      }}
                     />
                   </label>
                 ))}
@@ -307,7 +359,11 @@ export default function KnowledgeCardPage() {
                   maxLength={5000}
                   className="mt-2 w-full rounded-lg border p-3 font-normal"
                   value={form.description}
-                  onChange={(event) => setForm({ ...form, description: event.target.value })}
+                  disabled={saving}
+                  onChange={(event) => {
+                    dirty.current = true;
+                    setForm({ ...form, description: event.target.value });
+                  }}
                 />
               </label>
               <button disabled={saving} className="button border bg-white disabled:opacity-50">
@@ -344,7 +400,7 @@ export default function KnowledgeCardPage() {
                   <p className="mt-1 whitespace-pre-wrap">{asset.metadata.visualDescription}</p>
                 </div>
                 <p className="muted mt-5 text-sm">
-                  AI confidence：
+                  AI 分析置信度：
                   {asset.metadata.confidence === null
                     ? '未知'
                     : `${Math.round(asset.metadata.confidence * 100)}%`}
@@ -352,7 +408,10 @@ export default function KnowledgeCardPage() {
                 </p>
               </>
             ) : (
-              <p className="muted">尚未分析。请点击“开始 AI 分析”。</p>
+              <EmptyState
+                title="尚未生成视觉分析"
+                description="点击页面上方的“开始 AI 分析”，整理器型、纹样与推荐标签；所有结果仍需人工核对。"
+              />
             )}
           </section>
           <section className="card p-6">
@@ -376,7 +435,7 @@ export default function KnowledgeCardPage() {
                       className="ml-2 font-bold"
                       onClick={() =>
                         void saveTags(tags.filter((item) => item !== tag)).catch((reason) =>
-                          setError(reason instanceof Error ? reason.message : '保存标签失败。'),
+                          setError(userError(reason, '保存标签失败。')),
                         )
                       }
                     >
@@ -395,9 +454,7 @@ export default function KnowledgeCardPage() {
                 if (!tag || tags.includes(tag)) return;
                 void saveTags([...tags, tag])
                   .then(() => setNewTag(''))
-                  .catch((reason) =>
-                    setError(reason instanceof Error ? reason.message : '保存标签失败。'),
-                  );
+                  .catch((reason) => setError(userError(reason, '保存标签失败。')));
               }}
               className="flex gap-2"
             >

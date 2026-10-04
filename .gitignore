@@ -4,6 +4,9 @@ uploads/*
 node_modules/
 .next/
 .next-publish-test/
+.local-demo-test-*/
+.local-qa-test-*/
+.local-mvp-test-*/
 *.tsbuildinfo
 frontend/next-env.d.ts
 .local-uploads/

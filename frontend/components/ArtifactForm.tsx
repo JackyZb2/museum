@@ -1,6 +1,6 @@
 'use client';
 
-import type { FormEvent } from 'react';
+import { useRef, useState, type FormEvent } from 'react';
 
 export type ArtifactFormValues = {
   name: string;
@@ -20,6 +20,28 @@ type ArtifactFormProps = {
 };
 
 export function ArtifactForm({ title, form, change, onSubmit, submit }: ArtifactFormProps) {
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const locked = useRef(false);
+  async function save(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (locked.current) return;
+    if (!form.name.trim()) {
+      setError('文物名称不能为空。');
+      return;
+    }
+    locked.current = true;
+    setBusy(true);
+    setError('');
+    try {
+      await onSubmit(event);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : '保存失败，已填写内容保留。');
+    } finally {
+      locked.current = false;
+      setBusy(false);
+    }
+  }
   const fields: [keyof ArtifactFormValues, string][] = [
     ['name', '文物名称 *'],
     ['dynasty', '朝代'],
@@ -31,7 +53,7 @@ export function ArtifactForm({ title, form, change, onSubmit, submit }: Artifact
   return (
     <>
       <h1 className="mb-8 text-3xl font-bold">{title}</h1>
-      <form onSubmit={onSubmit} className="card max-w-3xl space-y-5 p-7">
+      <form onSubmit={save} className="card max-w-3xl space-y-5 p-7">
         {fields.map(([key, label]) => (
           <label className="block text-sm font-semibold" key={key}>
             {label}
@@ -52,7 +74,14 @@ export function ArtifactForm({ title, form, change, onSubmit, submit }: Artifact
             onChange={(event) => change('description', event.target.value)}
           />
         </label>
-        <button className="button primary">{submit}</button>
+        {error && (
+          <p role="alert" className="text-red-700">
+            {error}
+          </p>
+        )}
+        <button disabled={busy} className="button primary disabled:opacity-50">
+          {busy ? '正在保存…' : submit}
+        </button>
       </form>
     </>
   );

@@ -2,17 +2,18 @@ import { NextRequest, NextResponse } from 'next/server';
 import { unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { prisma } from '../../../lib/prisma';
-import { saveImage, UPLOAD_DIRECTORY } from '../../../lib/assets';
+import { saveImage, UPLOAD_DIRECTORY, ImageStorageError } from '../../../lib/assets';
+import { apiFailure, withApiErrors } from '../../../lib/api-errors';
 
 export const runtime = 'nodejs';
 
-export async function GET() {
+export const GET = withApiErrors(async () => {
   const assets = await prisma.museumAsset.findMany({
     orderBy: { createdAt: 'desc' },
     select: { id: true, name: true, category: true, imageUrl: true, status: true, createdAt: true },
   });
   return NextResponse.json(assets);
-}
+});
 
 export async function POST(request: NextRequest) {
   let uploadedFileName: string | null = null;
@@ -75,11 +76,15 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     if (uploadedFileName)
       await unlink(path.join(UPLOAD_DIRECTORY, uploadedFileName)).catch(() => {});
-    const message =
+    if (error instanceof ImageStorageError)
+      return NextResponse.json({ error: error.message }, { status: 503 });
+    if (
       error instanceof Error &&
       (error.message.startsWith('图片') || error.message.startsWith('仅支持'))
-        ? error.message
-        : '创建文物失败，请检查藏品编号是否重复并重试。';
-    return NextResponse.json({ error: message }, { status: 400 });
+    )
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    if (error instanceof TypeError)
+      return NextResponse.json({ error: '上传请求无效，请重新选择图片后重试。' }, { status: 400 });
+    return apiFailure(error);
   }
 }

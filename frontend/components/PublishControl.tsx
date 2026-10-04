@@ -1,7 +1,9 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
+import { userError } from '../lib/client-errors';
+import { Feedback } from './ui/Feedback';
 
 export function PublishControl({
   assetId,
@@ -16,6 +18,7 @@ export function PublishControl({
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const locked = useRef(false);
   const published = status === 'PUBLISHED';
   const reason =
     approvedCount === 0
@@ -25,6 +28,8 @@ export function PublishControl({
         : '';
 
   async function publish() {
+    if (locked.current || published || reason) return;
+    locked.current = true;
     setBusy(true);
     setError('');
     try {
@@ -33,8 +38,9 @@ export function PublishControl({
       if (!response.ok) throw new Error(result.error || '发布失败。');
       await onPublished();
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '发布失败。');
+      setError(userError(reason, '发布结果尚未确认，请刷新状态后重试。'));
     } finally {
+      locked.current = false;
       setBusy(false);
     }
   }
@@ -56,11 +62,7 @@ export function PublishControl({
         </button>
       )}
       {!published && reason && <p className="text-sm text-amber-800">{reason}</p>}
-      {error && (
-        <p role="alert" className="text-sm text-red-700">
-          {error}
-        </p>
-      )}
+      {error && <Feedback tone="error">{error}</Feedback>}
     </div>
   );
 }

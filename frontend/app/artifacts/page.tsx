@@ -1,16 +1,18 @@
 'use client';
 import Link from 'next/link';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Artifact } from '../../types';
 import { deleteArtifact, getArtifacts } from '../../lib/api';
 export default function Artifacts() {
   const [items, setItems] = useState<Artifact[]>([]),
     [q, setQ] = useState('');
+  const [error, setError] = useState('');
+  const locked = useRef(false);
   const load = useCallback(
     () =>
       getArtifacts(q)
         .then(setItems)
-        .catch(() => {}),
+        .catch((reason) => setError(reason instanceof Error ? reason.message : '列表加载失败。')),
     [q],
   );
   useEffect(() => {
@@ -18,10 +20,16 @@ export default function Artifacts() {
   }, [load]);
   return (
     <>
+      {error && (
+        <p role="alert" className="mb-4 text-red-700">
+          {error}
+        </p>
+      )}
       <header className="flex justify-between mb-8">
         <div>
-          <h1 className="text-3xl font-bold">文物藏品</h1>
-          <p className="muted mt-2">集中管理博物馆馆藏记录。</p>
+          <p className="eyebrow">旧版馆藏管理</p>
+          <h1 className="museum-title mt-2 text-3xl font-semibold">文物藏品</h1>
+          <p className="muted mt-2 text-sm">此处为旧版记录。AI 分析与审核流程请使用“文物资产”。</p>
         </div>
         <Link href="/artifacts/new" className="button primary">
           + 新建文物
@@ -35,7 +43,7 @@ export default function Artifacts() {
           onChange={(e) => setQ(e.target.value)}
         />
       </div>
-      <div className="card overflow-hidden">
+      <div className="card overflow-x-auto">
         <table className="w-full text-left">
           <thead className="bg-slate-50 text-sm muted">
             <tr>
@@ -64,9 +72,20 @@ export default function Artifacts() {
                   <button
                     className="text-red-600"
                     onClick={async () => {
+                      if (locked.current) return;
                       if (confirm('确定删除这件文物吗？')) {
-                        await deleteArtifact(a.id);
-                        load();
+                        locked.current = true;
+                        try {
+                          await deleteArtifact(a.id);
+                          await load();
+                          setError('');
+                        } catch (reason) {
+                          setError(
+                            reason instanceof Error ? reason.message : '删除失败，原数据保留。',
+                          );
+                        } finally {
+                          locked.current = false;
+                        }
                       }
                     }}
                   >

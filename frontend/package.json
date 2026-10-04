@@ -1,6 +1,6 @@
 {
   "name": "museumai-frontend",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -13,6 +13,9 @@
     "test:narration": "tsx scripts/test-narration-flow.ts",
     "test:review": "tsx scripts/test-review-flow.ts",
     "test:publish": "tsx scripts/test-publish-flow.ts",
+    "test:demo": "tsx scripts/test-demo-flow.ts",
+    "test:stability": "tsx --test lib/client-errors.test.ts && tsx scripts/test-stability.ts",
+    "test:mvp": "tsx scripts/test-mvp-final.ts",
     "format": "prettier --write \"{app,components,lib,types,prisma,scripts}/**/*.{ts,tsx,css}\" *.json *.js *.mjs *.ts",
     "format:check": "prettier --check \"{app,components,lib,types,prisma,scripts}/**/*.{ts,tsx,css}\" *.json *.js *.mjs *.ts",
     "db:generate": "prisma generate",
@@ -33,6 +36,7 @@
     "react": "19.0.0",
     "react-dom": "19.0.0",
     "server-only": "0.0.1",
+    "sharp": "0.35.5",
     "tailwindcss": "3.4.17",
     "typescript": "5.7.2"
   },

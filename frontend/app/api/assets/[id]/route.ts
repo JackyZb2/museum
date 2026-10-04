@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '../../../../lib/prisma';
 import { metadataMap, readTags } from '../../../../lib/assets';
+import { apiFailure, withApiErrors } from '../../../../lib/api-errors';
 
 export const runtime = 'nodejs';
 
 type Context = { params: Promise<{ id: string }> };
 
-export async function GET(_request: NextRequest, context: Context) {
+export const GET = withApiErrors(async (_request: NextRequest, context: Context) => {
   const { id } = await context.params;
   const asset = await prisma.museumAsset.findUnique({
     where: { id },
@@ -59,7 +60,7 @@ export async function GET(_request: NextRequest, context: Context) {
       }),
     ),
   });
-}
+});
 
 export async function PATCH(request: NextRequest, context: Context) {
   const { id } = await context.params;
@@ -93,6 +94,8 @@ export async function PATCH(request: NextRequest, context: Context) {
     return NextResponse.json({ error: '没有需要保存的字段。' }, { status: 400 });
   try {
     await prisma.$transaction(async (tx) => {
+      const current = await tx.museumAsset.findUnique({ where: { id }, select: { status: true } });
+      if (current?.status === 'PROCESSING') throw new Error('processing');
       await tx.museumAsset.update({ where: { id }, data });
       await tx.auditLog.create({
         data: {
@@ -105,10 +108,12 @@ export async function PATCH(request: NextRequest, context: Context) {
       });
     });
     return NextResponse.json({ success: true });
-  } catch {
-    return NextResponse.json(
-      { error: '保存失败，请检查文物是否存在或藏品编号是否重复。' },
-      { status: 400 },
-    );
+  } catch (error) {
+    if (error instanceof Error && error.message === 'processing')
+      return NextResponse.json(
+        { error: '文物正在分析，暂不能保存基本字段。已填写内容保留，请分析完成后保存。' },
+        { status: 409 },
+      );
+    return apiFailure(error);
   }
 }

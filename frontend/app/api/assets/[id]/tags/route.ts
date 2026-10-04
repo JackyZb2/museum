@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '../../../../../lib/prisma';
+import { apiFailure } from '../../../../../lib/api-errors';
 
 export const runtime = 'nodejs';
 type Context = { params: Promise<{ id: string }> };
@@ -46,7 +47,7 @@ export async function PUT(request: NextRequest, context: Context) {
     return result
       ? NextResponse.json({ tags: result })
       : NextResponse.json({ error: '未找到文物。' }, { status: 404 });
-  } catch {
-    return NextResponse.json({ error: '保存标签失败。' }, { status: 500 });
+  } catch (error) {
+    return apiFailure(error);
   }
 }

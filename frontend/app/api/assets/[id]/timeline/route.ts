@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '../../../../../lib/prisma';
+import { withApiErrors } from '../../../../../lib/api-errors';
 
 export const runtime = 'nodejs';
 type Context = { params: Promise<{ id: string }> };
 
-export async function GET(_request: NextRequest, context: Context) {
+export const GET = withApiErrors(async (_request: NextRequest, context: Context) => {
   const { id } = await context.params;
   const asset = await prisma.museumAsset.findUnique({ where: { id }, select: { id: true } });
   if (!asset) return NextResponse.json({ error: '未找到文物。' }, { status: 404 });
@@ -34,4 +35,4 @@ export async function GET(_request: NextRequest, context: Context) {
       };
     }),
   );
-}
+});
